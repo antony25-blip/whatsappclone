@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CIPHER DEFEND</title>
+    <style>
+        body { 
+            margin: 0; 
+            font-family: 'Segoe UI', Arial, sans-serif; 
+            display: flex; 
+            height: 100vh; 
+            background-color: #f5f5f5; 
+        }
+        .user-list { 
+            width: 25%; 
+            background-color: #ffffff; 
+            padding: 10px; 
+            border-right: 1px solid #ddd; 
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1); 
+        }
+        .user { 
+            padding: 10px; 
+            cursor: pointer; 
+            border-radius: 10px; 
+            transition: background-color 0.2s; 
+            position: relative; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            margin-bottom: 5px; 
+        }
+        .user:hover { 
+            background-color: #f0f0f0; 
+        }
+        .chat-container { 
+            flex-grow: 1; 
+            display: flex; 
+            flex-direction: column; 
+            background-color: #f8f9fa; 
+        }
+        .chat-header { 
+            padding: 15px; 
+            background-color: #075e54; 
+            color: white; 
+            font-size: 18px; 
+            font-weight: bold; 
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1); 
+        }
+        .chat-messages { 
+            flex-grow: 1; 
+            padding: 15px; 
+            overflow-y: auto; 
+            background-color: #ece5dd; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 10px; 
+        }
+        .message { 
+            max-width: 70%; 
+            padding: 10px 15px; 
+            border-radius: 15px; 
+            position: relative; 
+            animation: fadeIn 0.3s ease-in-out; 
+        }
+        .message.sent { 
+            background-color: #dcf8c6; 
+            align-self: flex-end; 
+            border-bottom-right-radius: 5px; 
+        }
+        .message.received { 
+            background-color: #ffffff; 
+            align-self: flex-start; 
+            border-bottom-left-radius: 5px; 
+        }
+        .message .timestamp { 
+            font-size: 12px; 
+            color: #666; 
+            margin-top: 5px; 
+            text-align: right; 
+        }
+        .chat-input { 
+            display: flex; 
+            padding: 10px; 
+            background-color: #ffffff; 
+            box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.1); 
+        }
+        .chat-input input { 
+            flex-grow: 1; 
+            padding: 10px; 
+            border-radius: 20px; 
+            border: 1px solid #ddd; 
+            outline: none; 
+            font-size: 14px; 
+        }
+        .chat-input button { 
+            margin-left: 10px; 
+            padding: 10px 20px; 
+            background-color: #075e54; 
+            color: white; 
+            border: none; 
+            border-radius: 20px; 
+            cursor: pointer; 
+            font-size: 14px; 
+            transition: background-color 0.2s; 
+        }
+        .chat-input button:hover { 
+            background-color: #128c7e; 
+        }
+        .unread-count { 
+            background: #25d366; 
+            color: white; 
+            padding: 2px 8px; 
+            border-radius: 50%; 
+            font-size: 12px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+        }
+        @keyframes fadeIn { 
+            from { opacity: 0; transform: translateY(10px); } 
+            to { opacity: 1; transform: translateY(0); } 
+        }
+    </style>
+</head>
+<body>
+    <div class="user-list">
+        <h2>Users</h2>
+        {% for user in users %}
+        <div class="user" data-username="{{ user.username }}">
+            <div>{{ user.username }}</div>
+            {% if unread_counts[user.username] > 0 %}
+            <div class="unread-count">{{ unread_counts[user.username] }}</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    
+    <div class="chat-container">
+        <div class="chat-header">Select a user to chat</div>
+        <div class="chat-messages"></div>
+        <div class="chat-input">
+            <input type="text" placeholder="Type a message..." id="messageInput">
+            <button id="sendButton">Send</button>
+        </div>
+    </div>
+
+    <script>
+        let currentReceiver = null;
+
+        document.querySelectorAll('.user').forEach(user => {
+            user.addEventListener('click', () => {
+                currentReceiver = user.getAttribute('data-username');
+                document.querySelector('.chat-header').textContent = `Chat with ${currentReceiver}`;
+                fetchMessages();
+            });
+        });
+
+        function fetchMessages() {
+            fetch(`/get_messages/${currentReceiver}`)
+            .then(response => response.json())
+            .then(data => {
+                const chatMessages = document.querySelector('.chat-messages');
+                chatMessages.innerHTML = data.map(msg => `
+                    <div class="message ${msg.sender === currentReceiver ? 'received' : 'sent'}">
+                        <div>${msg.message}</div>
+                        <div class="timestamp">${new Date(msg.timestamp).toLocaleTimeString()}</div>
+                    </div>
+                `).join('');
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            });
+        }
+
+        document.getElementById('sendButton').addEventListener('click', () => {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value.trim();
+            if (!message) return;
+
+            fetch('/send_message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `receiver=${currentReceiver}&message=${message}`
+            }).then(() => {
+                fetchMessages();
+                messageInput.value = '';
+            });
+        });
+    </script>
+</body>
+</html>
