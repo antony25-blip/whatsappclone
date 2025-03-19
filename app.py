@@ -3,10 +3,12 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
+import re
+import requests  # Add this for API calls
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://myuser:mypassword@localhost:5432/minipro_phising'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
@@ -16,7 +18,7 @@ migrate = Migrate(app, db)
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
-    password = db.Column(db.String(100), nullable=False)
+    password = db.Column(db.Text, nullable=False)
 
 class Message(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -26,8 +28,18 @@ class Message(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     is_read = db.Column(db.Boolean, default=False)
 
+# Create database tables
 with app.app_context():
     db.create_all()
+
+# Function to extract URLs from text
+import validators
+
+def extract_urls(text):
+    url_pattern = r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+|www\.[-\w./?=&%]+'
+    urls = re.findall(url_pattern, text)
+    valid_urls = [url for url in urls if validators.url(url)]
+    return valid_urls
 
 @app.route('/', methods=['GET', 'POST'])
 def login():
@@ -70,7 +82,6 @@ def messaging():
     current_user = session['username']
     users = User.query.filter(User.username != current_user).all()
     
-    # Fetch unread messages count for each user
     unread_counts = {user.username: Message.query.filter_by(sender=user.username, receiver=current_user, is_read=False).count() for user in users}
     
     return render_template('messaging.html', users=users, unread_counts=unread_counts)
@@ -92,7 +103,40 @@ def get_messages(receiver):
         message.is_read = True
     db.session.commit()
     
-    return jsonify([{'sender': m.sender, 'message': m.message, 'timestamp': m.timestamp.strftime('%Y-%m-%d %H:%M:%S')} for m in messages])
+    # Process messages for URLs and phishing detection
+    message_data = []
+    for m in messages:
+        urls = extract_urls(m.message)
+        is_phishing = False
+        phishing_alert = None
+        
+        if urls:
+            for url in urls:
+                try:
+                    # Call the predict.py API
+                    response = requests.post('http://localhost:5001/predict', json={'url': url})
+                    if response.status_code == 200:
+                        result = response.json()
+                        prediction = result['prediction']
+                        if prediction == 'Phishing':
+                            is_phishing = True
+                            phishing_alert = f"Warning: The URL '{url}' may be a phishing link!"
+                            break
+                    else:
+                        phishing_alert = f"Error checking URL '{url}': API unavailable."
+                except Exception as e:
+                    print(f"Error checking URL {url}: {str(e)}")
+                    phishing_alert = f"Error checking URL '{url}': Unable to verify safety."
+        
+        message_data.append({
+            'sender': m.sender,
+            'message': m.message,
+            'timestamp': m.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+            'is_phishing': is_phishing,
+            'phishing_alert': phishing_alert
+        })
+    
+    return jsonify(message_data)
 
 @app.route('/send_message', methods=['POST'])
 def send_message():
@@ -118,4 +162,3 @@ if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
-
